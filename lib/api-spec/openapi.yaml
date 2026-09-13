@@ -1,0 +1,733 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: content
+    description: Public ministry content
+  - name: engagement
+    description: Public forms and member engagement
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /home:
+    get:
+      operationId: getHomeContent
+      tags: [content]
+      summary: Get the homepage content bundle
+      responses:
+        "200":
+          description: Homepage content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HomeContent"
+  /ministries:
+    get:
+      operationId: listMinistries
+      tags: [content]
+      summary: List ministry departments
+      responses:
+        "200":
+          description: Ministry list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ministry"
+  /events:
+    get:
+      operationId: listEvents
+      tags: [content]
+      summary: List upcoming events
+      responses:
+        "200":
+          description: Upcoming events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+  /sermons:
+    get:
+      operationId: listSermons
+      tags: [content]
+      summary: List recent sermons
+      parameters:
+        - in: query
+          name: series
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+      responses:
+        "200":
+          description: Sermon library
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sermon"
+  /blogs:
+    get:
+      operationId: listBlogs
+      tags: [content]
+      summary: List published reflections
+      parameters:
+        - in: query
+          name: category
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+      responses:
+        "200":
+          description: Published blog posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Blog"
+  /devotionals/today:
+    get:
+      operationId: getTodayDevotional
+      tags: [content]
+      summary: Get today's devotional
+      responses:
+        "200":
+          description: Daily devotional
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Devotional"
+  /testimonies:
+    get:
+      operationId: listTestimonies
+      tags: [content]
+      summary: List approved testimonies
+      responses:
+        "200":
+          description: Approved testimonies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Testimony"
+  /live:
+    get:
+      operationId: getLiveStatus
+      tags: [content]
+      summary: Get the current livestream status
+      responses:
+        "200":
+          description: Livestream status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveStatus"
+  /live/offer:
+    get:
+      operationId: getLiveOffer
+      tags: [content]
+      summary: Get the active livestream offer
+      responses:
+        "200":
+          description: Active WebRTC offer, or null when offline
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/LiveSignal"
+                  - type: "null"
+    post:
+      operationId: publishLiveOffer
+      tags: [engagement]
+      summary: Publish a broadcaster WebRTC offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LiveOfferInput"
+      responses:
+        "201":
+          description: Livestream session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveSession"
+        "400":
+          description: Invalid offer
+        "401":
+          description: Authentication required
+        "403":
+          description: Media Admin access required
+  /live/answer:
+    get:
+      operationId: getLiveAnswer
+      tags: [content]
+      summary: Get a viewer answer for the active livestream
+      parameters:
+        - in: query
+          name: sessionId
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Viewer WebRTC answer, or null while waiting
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/LiveSignal"
+                  - type: "null"
+        "401":
+          description: Authentication required
+        "403":
+          description: Media Admin access required
+    post:
+      operationId: submitLiveAnswer
+      tags: [engagement]
+      summary: Submit a viewer WebRTC answer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LiveAnswerInput"
+      responses:
+        "201":
+          description: Answer received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionReceipt"
+        "400":
+          description: Invalid answer
+  /live/stop:
+    post:
+      operationId: stopLiveSession
+      tags: [engagement]
+      summary: Stop the active livestream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LiveStopInput"
+      responses:
+        "200":
+          description: Livestream stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveStatus"
+        "401":
+          description: Authentication required
+        "403":
+          description: Media Admin access required
+  /admin/otp/request:
+    post:
+      operationId: requestAdminOtp
+      tags: [admin]
+      summary: Create an individual Media Admin OTP challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminOtpRequestInput"
+      responses:
+        "200":
+          description: On-screen OTP challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOtpChallenge"
+        "401":
+          description: Invalid admin access token
+        "404":
+          description: Admin ID not found
+        "503":
+          description: Admin access token is not configured
+  /admin/otp/verify:
+    post:
+      operationId: verifyAdminOtp
+      tags: [admin]
+      summary: Verify an on-screen Media Admin OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminOtpVerifyInput"
+      responses:
+        "200":
+          description: Authenticated Media Admin session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSession"
+        "401":
+          description: Invalid or expired OTP
+  /admin/session:
+    get:
+      operationId: getAdminSession
+      tags: [admin]
+      summary: Get the current Media Admin session
+      responses:
+        "200":
+          description: Current Media Admin session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSession"
+        "401":
+          description: No active Media Admin session
+  /admin/logout:
+    post:
+      operationId: logoutAdmin
+      tags: [admin]
+      summary: End the current Media Admin session
+      responses:
+        "200":
+          description: Session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionReceipt"
+  /prayers:
+    post:
+      operationId: createPrayerRequest
+      tags: [engagement]
+      summary: Submit a prayer request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrayerRequestInput"
+      responses:
+        "201":
+          description: Prayer request received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionReceipt"
+        "400":
+          description: Invalid prayer request
+  /members:
+    post:
+      operationId: registerMember
+      tags: [engagement]
+      summary: Register a new member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberInput"
+      responses:
+        "201":
+          description: Member registration received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionReceipt"
+        "400":
+          description: Invalid member registration
+  /consultations:
+    post:
+      operationId: createConsultation
+      tags: [engagement]
+      summary: Request a private consultation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsultationInput"
+      responses:
+        "201":
+          description: Consultation request received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionReceipt"
+        "400":
+          description: Invalid consultation request
+  /contacts:
+    post:
+      operationId: createContactMessage
+      tags: [engagement]
+      summary: Send a contact message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactInput"
+      responses:
+        "201":
+          description: Contact message received
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionReceipt"
+        "400":
+          description: Invalid contact message
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    Ministry:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        accent:
+          type: string
+      required: [id, name, description, accent]
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        date:
+          type: string
+        time:
+          type: string
+        category:
+          type: string
+      required: [id, title, description, location, date, time, category]
+    Sermon:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        speaker:
+          type: string
+        description:
+          type: string
+        series:
+          type: string
+        date:
+          type: string
+        duration:
+          type: string
+        videoUrl:
+          type: ["string", "null"]
+        audioUrl:
+          type: ["string", "null"]
+      required: [id, title, speaker, description, series, date, duration, videoUrl, audioUrl]
+    Blog:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        excerpt:
+          type: string
+        category:
+          type: string
+        author:
+          type: string
+        date:
+          type: string
+        readTime:
+          type: string
+      required: [id, title, excerpt, category, author, date, readTime]
+    Devotional:
+      type: object
+      properties:
+        verse:
+          type: string
+        reference:
+          type: string
+        reflection:
+          type: string
+        prayerPoint:
+          type: string
+        date:
+          type: string
+      required: [verse, reference, reflection, prayerPoint, date]
+    Testimony:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        content:
+          type: string
+        location:
+          type: string
+      required: [id, name, content, location]
+    LiveStatus:
+      type: object
+      properties:
+        isLive:
+          type: boolean
+        platform:
+          type: ["string", "null"]
+        title:
+          type: ["string", "null"]
+        embedUrl:
+          type: ["string", "null"]
+        nextService:
+          type: string
+      required: [isLive, platform, title, embedUrl, nextService]
+    LiveSignal:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        type:
+          type: string
+        sdp:
+          type: string
+      required: [sessionId, type, sdp]
+    LiveOfferInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          minLength: 1
+        sdp:
+          type: string
+          minLength: 1
+      required: [sessionId, title, type, sdp]
+    LiveAnswerInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          minLength: 1
+        sdp:
+          type: string
+          minLength: 1
+      required: [sessionId, type, sdp]
+    LiveStopInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+      required: [sessionId]
+    LiveSession:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        title:
+          type: string
+        isLive:
+          type: boolean
+      required: [sessionId, title, isLive]
+    AdminOtpRequestInput:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        adminId:
+          type: string
+      required: [accessToken]
+    AdminOtpChallenge:
+      type: object
+      properties:
+        challengeId:
+          type: string
+        adminId:
+          type: string
+        adminName:
+          type: string
+        otp:
+          type: string
+        expiresInSeconds:
+          type: integer
+      required: [challengeId, adminId, adminName, otp, expiresInSeconds]
+    AdminOtpVerifyInput:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          minLength: 1
+        otp:
+          type: string
+          minLength: 6
+          maxLength: 6
+      required: [challengeId, otp]
+    Admin:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        createdAt:
+          type: string
+      required: [id, name, createdAt]
+    AdminSession:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        admin:
+          $ref: "#/components/schemas/Admin"
+      required: [authenticated, admin]
+    HomeContent:
+      type: object
+      properties:
+        devotional:
+          $ref: "#/components/schemas/Devotional"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        sermons:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sermon"
+        blog:
+          $ref: "#/components/schemas/Blog"
+        live:
+          $ref: "#/components/schemas/LiveStatus"
+      required: [devotional, events, sermons, blog, live]
+    PrayerRequestInput:
+      type: object
+      properties:
+        name:
+          type: string
+        request:
+          type: string
+          minLength: 4
+        anonymous:
+          type: boolean
+      required: [request, anonymous]
+    MemberInput:
+      type: object
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+        gender:
+          type: string
+        occupation:
+          type: string
+        address:
+          type: string
+        birthday:
+          type: ["string", "null"]
+        prayerRequest:
+          type: string
+      required: [firstName, lastName, phone, email, gender, occupation, address, birthday, prayerRequest]
+    ConsultationInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        subject:
+          type: string
+        message:
+          type: string
+          minLength: 4
+      required: [name, email, phone, subject, message]
+    ContactInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        message:
+          type: string
+          minLength: 4
+      required: [name, email, message]
+    SubmissionReceipt:
+      type: object
+      properties:
+        id:
+          type: string
+        message:
+          type: string
+      required: [id, message]
+

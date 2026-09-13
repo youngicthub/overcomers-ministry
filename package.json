@@ -1,0 +1,29 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "workspaces": [
+    "artifacts/*",
+    "lib/*",
+    "lib/integrations/*",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "npm run typecheck && npm run build --workspaces --if-present",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "npm run typecheck:libs && npm run typecheck --workspaces --if-present"
+  },
+  "dependencies": {
+    "@replit/connectors-sdk": "^0.4.3"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
+  },
+  "overrides": {
+    "esbuild": "0.28.2",
+    "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
+    "js-yaml": "4.3.2"
+  }
+}
