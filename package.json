@@ -1,29 +1,18 @@
 {
-  "name": "workspace",
-  "version": "0.0.0",
-  "license": "MIT",
+  "name": "overcomers-faith-ministry",
   "private": true,
+  "version": "1.0.0",
   "workspaces": [
-    "artifacts/*",
-    "lib/*",
-    "lib/integrations/*",
-    "scripts"
+    "Backend",
+    "Frontend"
   ],
   "scripts": {
-    "build": "npm run typecheck && npm run build --workspaces --if-present",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "npm run typecheck:libs && npm run typecheck --workspaces --if-present"
-  },
-  "dependencies": {
-    "@replit/connectors-sdk": "^0.4.3"
-  },
-  "devDependencies": {
-    "prettier": "^3.9.6",
-    "typescript": "~5.9.3"
-  },
-  "overrides": {
-    "esbuild": "0.28.2",
-    "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
-    "js-yaml": "4.3.2"
+    "install:all": "npm install",
+    "dev:backend": "npm run dev --workspace Backend",
+    "dev:frontend": "npm run dev --workspace Frontend",
+    "build:backend": "npm run build --workspace Backend",
+    "build:frontend": "npm run build --workspace Frontend",
+    "build": "npm run build:backend && npm run build:frontend",
+    "db:push": "npm run db:push --workspace Backend"
   }
 }
