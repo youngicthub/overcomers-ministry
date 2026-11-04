@@ -1,179 +1,81 @@
-# Overcomers Faith Ministry
+# Overcomers Faith Ministry — Next.js on Vercel
 
-A two-folder project: **Backend** (Express + Drizzle + Postgres API) and
-**Frontend** (Vite + React site). Each folder is a standalone app with its
-own `package.json` — the root just wires them together for convenience.
+The original Vite + Express project, converted to a single **Next.js (App Router)** app that runs on Vercel's serverless platform. The pages, design and admin dashboard are the same; the backend is now Next.js route handlers under `src/app/api`.
 
 ```
-Overcomers-Faith-Ministry/
-├── Backend/     Express API, Drizzle ORM schema, admin auth, everything under /api
-├── Frontend/    Vite + React public site + admin dashboard
-└── package.json Root convenience scripts (npm workspaces)
+src/
+├── app/
+│   ├── (site)/…            public pages (home, sermons, gallery, give, …) inside the site header/footer
+│   ├── admin/…             /admin, /admin/login, /admin/signup, /admin/dashboard, /admin/live
+│   └── api/…               the old Express API, one route handler per endpoint (same URLs as before)
+├── components/             site pages, admin dashboard, live studio, UI primitives
+└── server/                 database schema (Drizzle), services, sessions, rate limiting
+public/gallery/             the 30 starter Cultural Day photos (served as static files)
 ```
 
-## 1. What's new in this structure
+## 1. Deploy to Vercel
 
-- **Two plain folders** instead of the old npm-workspaces monorepo
-  (`artifacts/*`, `lib/*`). Backend and Frontend no longer depend on any
-  shared package — each is self-contained and can be deployed
-  independently.
-- **Articles** (`Backend/src/db/schema/articles.ts`) — a real database
-  table. Media Admins write, edit, publish/unpublish, and delete articles
-  from the admin dashboard's **Articles** tab. The public **Articles**
-  page (`/articles`, with `/blog` kept as an alias) only shows published
-  ones. This replaces the old hardcoded sample "blog" list.
-- **Videos** (`Backend/src/db/schema/videos.ts`) — admins paste a YouTube
-  link (watch / shorts / youtu.be / already-embeddable) or any other
-  embeddable/direct video link from the **Videos** tab in the admin
-  dashboard. The public **Videos** page (`/videos`) shows a grid of
-  thumbnails; clicking one opens an inline player (`<iframe>` for YouTube
-  and similar, `<video>` for direct file links) right on the page — no
-  new tab. A "Latest videos" strip also appears on the homepage.
-- **Admin sign-up & sign-in now use real passwords**, not the original
-  OTP-in-the-response placeholder. Sign-up is still gated by the shared
-  `MEDIA_ADMIN_ACCESS_TOKEN`, but signing back in only needs the admin's
-  own Admin ID + password. See [section 3](#3-admin-sign-up--sign-in)
-  and [section 5, Security](#5-security).
+1. **Database.** Use the Postgres you already have (Neon) or a new one. Take the *pooled* connection string (Neon: the host containing `-pooler`).
+2. **Create the tables** (once, and again whenever `src/server/db/schema` changes). From your computer:
+   ```bash
+   npm install
+   cp .env.example .env.local        # fill in DATABASE_URL at least
+   npm run db:push
+   ```
+   This adds two new tables (`app_kv`, `rate_limits`) and one new nullable column (`gallery_photos.url`). Existing data and existing admin accounts are untouched.
+3. **Push this folder to a Git repo** and import it in Vercel (framework is detected as Next.js).
+4. **Add a Blob store** for gallery uploads: Vercel project → **Storage** → **Create** → **Blob** → connect to the project. This adds `BLOB_READ_WRITE_TOKEN` automatically.
+5. **Environment variables** (Project → Settings → Environment Variables):
 
-## 2. Setup
+   | Variable | Required | Notes |
+   |---|---|---|
+   | `DATABASE_URL` | yes | pooled Postgres URL |
+   | `SESSION_SECRET` | yes | `openssl rand -base64 48` — signs admin login cookies |
+   | `MEDIA_ADMIN_ACCESS_TOKEN` | yes | invite code for `/admin/signup`; sign-up is off while empty |
+   | `BLOB_READ_WRITE_TOKEN` | yes for uploads | added by the Blob store |
+   | `NEXT_PUBLIC_SITE_URL` | optional | e.g. `https://overcomers.church`, for share-card metadata |
+   | `FRONTEND_ORIGIN` | optional | extra trusted origins; the site's own domain is always trusted |
 
-This delivery already ships a working `Backend/.env` and `Frontend/.env`
-pointed at a development database, so you can `npm install && npm run dev`
-immediately without configuring anything first. **Replace both `.env`
-files before you deploy to production** — see [Deploying](#6-deploying).
-`.env` is git-ignored on purpose; `.env.example` documents what each
-variable does.
+6. **Deploy**, then open `/admin/signup` to create your first Media Admin.
 
-### Backend
+`vercel.json` pins functions to `iad1` (Washington, DC), the closest region to a Neon database in `us-east-2`. Change it if your database is elsewhere.
+
+> **Rotate your old secrets.** The zip you started from contained a real `DATABASE_URL` and `MEDIA_ADMIN_ACCESS_TOKEN` in `Backend/.env`. None of it was copied here, but since that file has been shared, reset the database password and generate a new access token.
+
+## 2. Local development
 
 ```bash
-cd Backend
 npm install
-npm run db:push       # creates all tables from src/db/schema
-npm run dev           # starts the API on PORT (default 5000)
-```
-
-### Frontend
-
-```bash
-cd Frontend
-npm install
-npm run dev            # starts Vite on PORT (default 5173), proxies /api to the Backend
-```
-
-Or, from the repo root, `npm install` once (npm workspaces) and then use
-`npm run dev:backend` / `npm run dev:frontend` in two terminals.
-
-## 3. Admin sign-up & sign-in
-
-Go to **`/admin`** (e.g. `localhost:5173/admin`, or `yourdomain.com/admin`
-once deployed) — it automatically sends you to the dashboard if you're
-already signed in, or to the login page if you're not. You don't need to
-remember `/admin/login` or `/admin/dashboard` specifically.
-
-Creating a new admin account and signing back in afterwards use two
-different secrets, on purpose:
-
-- **Sign-up** (`/admin/signup`) requires the shared
-  **`MEDIA_ADMIN_ACCESS_TOKEN`** (set in `Backend/.env`) — think of it as
-  an invite code for your team, not a personal credential. Enter it plus
-  your name and choose your own password (10+ characters, letters and
-  numbers). You'll be shown a generated **Admin ID** — save it, it's
-  never shown again.
-- **Sign-in** (`/admin/login`) only needs your own **Admin ID +
-  password**. It does not need the access token at all — so day-to-day
-  logins don't depend on a secret the whole team shares.
-
-Passwords are hashed with scrypt (Node's built-in `crypto` module, no
-plaintext or reversible storage anywhere) and are never returned by any
-API response. Five wrong passwords for one Admin ID locks that ID out
-for 15 minutes, regardless of which IP the attempts came from.
-
-Any signed-in Media Admin can write/edit Articles, manage Videos and
-Sermons, and see Prayer Requests / New Members / Workers — there's no
-separate "author" role, every Media Admin has the same permissions.
-
-If `MEDIA_ADMIN_ACCESS_TOKEN` is unset, sign-up is disabled (`503`)
-until you set it.
-
-## 4. Database
-
-Postgres, managed with Drizzle ORM/Kit. Schema lives in
-`Backend/src/db/schema/*.ts`. After changing a schema file, run:
-
-```bash
-cd Backend
+cp .env.example .env.local   # fill in DATABASE_URL, SESSION_SECRET, MEDIA_ADMIN_ACCESS_TOKEN
 npm run db:push
+npm run dev                  # http://localhost:3000
 ```
 
-⚠️ **If you had already run `db:push` before this update**, the `admins`
-table just gained a required `password_hash` column. Any admin accounts
-created under the old OTP flow have no password and can't log in under
-the new one. Since this is pre-launch, the simplest fix is to clear that
-table and have your team sign up again:
+For gallery uploads locally, run `npx vercel env pull .env.local` (after linking the project) to get `BLOB_READ_WRITE_TOKEN`.
 
-```sql
-TRUNCATE TABLE admins;
-```
+## 3. What had to change for serverless
 
-Articles and Sermons each seed a few sample rows automatically the first
-time their table is empty, so the public site isn't blank before an
-admin has written anything. Videos start empty — there's no meaningful
-placeholder video to seed.
+Serverless functions are short-lived, run as many parallel instances, share no memory, and have a read-only filesystem. The Express backend relied on all four, so:
 
-## 5. Security
+| Before (Express, one long-running server) | Now (serverless) |
+|---|---|
+| Admin sessions in an in-memory `Map` | **Signed, stateless cookie** (HMAC-SHA256, 8h, `HttpOnly; SameSite=Strict; Secure`). The admin row is re-checked in the database on every request, so deleting an admin ends their access immediately. |
+| Login lockout and rate limits in process memory | **Stored in Postgres** (`rate_limits`), so they hold across every instance. IPs are stored only as salted hashes. Same limits: 5 bad passwords → 15 min lockout; 10 auth attempts / 15 min / IP; 20 form posts / hour / IP. |
+| Gallery photos written to `Backend/uploads/` | **Vercel Blob.** Browsers upload straight to Blob (Vercel rejects request bodies over ~4.5 MB, so 8 MB photos can't pass through the API); the API only records the URLs. Limits unchanged: JPEG/PNG/WEBP/GIF, 10 at a time, 8 MB each. |
+| Starter photos copied from `seed/` to `uploads/` at runtime | Starter photos are plain static files in `public/gallery/`, registered in the database once. |
+| "Already seeded" flags in memory / a marker file | A flag row in the database, so starter sermons/articles/photos are created once, ever. |
+| Live-broadcast offer/answer in module variables | Stored in Postgres (`app_kv`) so the broadcaster and viewer can reach the same state from different instances. |
+| `helmet`, `cors`, `cookie-parser`, `multer`, `pino`, `express-rate-limit` | Not needed. The API is same-origin so there is no CORS; security headers are in `next.config.mjs`; the Origin/Referer CSRF check is kept (`src/server/lib/origin.ts`). |
+| Public GET endpoints hit the database every time | Edge-cached for 60 s (`s-maxage=60, stale-while-revalidate`), so a traffic spike doesn't become a database spike. Admin edits appear within about a minute. `/api/home`, `/api/live` and everything under `/api/admin` are never cached. |
 
-This app went through a hardening pass specifically to get it
-production-ready:
+Behaviour changes to be aware of:
 
-- **Password-based admin auth** — see [section 3](#3-admin-sign-up--sign-in).
-  Passwords are hashed with scrypt, never stored or returned in plaintext.
-  Per-admin-ID lockout after 5 failed attempts (15 min cooldown).
-- **Rate limiting** (`express-rate-limit`) on `/admin/signup` and
-  `/admin/login` (10 attempts / 15 min per IP), on the public
-  prayer/member/consultation/contact forms (20 / hour per IP), and a
-  generous global ceiling on every other route.
-- **Locked-down CORS** — the API only accepts credentialed
-  (cookie-carrying) cross-origin requests from origins listed in
-  `FRONTEND_ORIGIN`. It never reflects an arbitrary caller's origin.
-  **You must set `FRONTEND_ORIGIN` to your real deployed frontend
-  URL(s) before going live**, or admin sign-in will fail from that
-  domain.
-- **CSRF defense-in-depth** — the admin session cookie is
-  `httpOnly; SameSite=Strict; Secure` (in production), and every
-  state-changing admin request additionally checks the `Origin`/
-  `Referer` header against `FRONTEND_ORIGIN`.
-- **Security headers** via `helmet` (a strict default
-  Content-Security-Policy, `X-Frame-Options`, HSTS, etc).
-- **Request body size caps** (512kb) to blunt oversized-payload abuse.
-- **Zod validation** on every request body/query — unchanged from
-  before, still the first line of defense against malformed input.
+- Everyone is signed out once, after the first deploy (the cookie format changed). Existing admin IDs and passwords still work.
+- Signed cookies can't be revoked individually. To force-logout everyone, change `SESSION_SECRET`.
+- The old global limit of 600 requests / 15 min on every route is not reimplemented. Use Vercel's Firewall / rate limiting for site-wide abuse protection.
 
-What's *not* included, and worth adding as you grow: persisting admin
-sessions in the database instead of in-memory (so they survive a
-restart and work across multiple server instances), structured audit
-logging of admin actions, and a way to revoke a specific admin's access
-without deleting their row. None of these block going live for a single
-small-team deployment, but they're the natural next steps.
+## 4. Known limitations (carried over from the original)
 
-## 6. Deploying
-
-⚠️ The `Backend/.env` and `Frontend/.env` shipped in this repo point at a
-**development** database and use a development access token. Before
-deploying anywhere public:
-
-1. Replace `DATABASE_URL` with your production database.
-2. Generate a new, private `MEDIA_ADMIN_ACCESS_TOKEN` — don't reuse the
-   dev one, and don't reuse it for anything else either.
-3. Set `FRONTEND_ORIGIN` to your real deployed frontend URL(s).
-
-- **Backend**: `npm run build` (bundles to `Backend/dist/index.mjs` with
-  esbuild), then `npm start`. Needs `PORT`, `DATABASE_URL`,
-  `MEDIA_ADMIN_ACCESS_TOKEN`, and `FRONTEND_ORIGIN` set in the
-  environment.
-- **Frontend**: `npm run build` (outputs static files to
-  `Frontend/dist/public`), served by any static host or reverse-proxied
-  behind the same domain as the Backend. Set `API_PROXY_TARGET` (dev
-  only) or point your production reverse proxy's `/api` route at the
-  Backend.
-# overcomers-ministry
+- **Events, ministries and testimonies** are defined in code (`src/server/content.ts`). The three sample event dates are in September 2026 and now in the past; edit them there.
+- **Live broadcast** is a single WebRTC peer-to-peer connection with Google STUN only: it supports one viewer at a time and can fail behind strict firewalls (no TURN server). For a real congregation stream, embed YouTube Live or use a streaming service instead.
+- **Social links** in the footer are placeholder buttons; the address, phone, email and bank details on Give/Contact are placeholder text.
