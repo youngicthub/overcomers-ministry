@@ -14,7 +14,7 @@ export type LiveStatus = {
   nextService: string;
 };
 
-const NEXT_SERVICE = "Sunday Celebration Service · Sunday at 8:00 AM";
+const NEXT_SERVICE = "Sunday Celebration Service · Sunday at 7:00 AM";
 
 // WebRTC signaling (offer/answer) used to be module-level variables in the
 // Express process. On serverless the offer posted by the broadcaster and the

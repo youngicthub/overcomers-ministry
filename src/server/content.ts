@@ -46,7 +46,7 @@ export const events = [
     description: "A joyful gathering for worship, the Word, and a fresh start to the week.",
     location: "Main Auditorium",
     date: "2026-09-13",
-    time: "8:00 AM & 10:00 AM",
+    time: "7:00 AM & 9:00 AM",
     category: "Worship",
   },
   {
