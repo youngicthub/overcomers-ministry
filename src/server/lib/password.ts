@@ -1,7 +1,4 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
-
-const scrypt = promisify(scryptCallback);
 
 // scrypt parameters. N=16384 (2^14), r=8, p=1 is the configuration Node's
 // own docs use as a baseline "reasonably secure" default; the resulting
@@ -13,12 +10,18 @@ const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const KEY_LENGTH = 64;
 
-function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
-  return scrypt(password.normalize("NFKC"), salt, KEY_LENGTH, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-  }) as Promise<Buffer>;
+function deriveKey(
+  password: string,
+  salt: Buffer,
+  keyLength = KEY_LENGTH,
+  options = { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P },
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(password.normalize("NFKC"), salt, keyLength, options, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
 }
 
 /** Hashes a plaintext password into a single storable string:
@@ -46,11 +49,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
   const salt = Buffer.from(saltHex, "hex");
   const expected = Buffer.from(hashHex, "hex");
-  const derived = (await scrypt(password.normalize("NFKC"), salt, expected.length, {
-    N: n,
-    r,
-    p,
-  })) as Buffer;
+  const derived = await deriveKey(password, salt, expected.length, { N: n, r, p });
 
   return derived.length === expected.length && timingSafeEqual(derived, expected);
 }
