@@ -56,7 +56,7 @@ function mutationRequest<T>(method: string, url: string, body?: unknown): Promis
 
 export type Devotional = { verse: string; reference: string; reflection: string; prayerPoint: string; date: string };
 export type Ministry = { id: string; name: string; description: string; accent: string };
-export type ChurchEvent = { id: number; title: string; description: string; location: string; date: string; time: string; category: string };
+export type ChurchEvent = { id: number; title: string; description: string; location: string; date: string | null; time: string; category: string };
 export type Sermon = { id: number; title: string; speaker: string; description: string; series: string; date: string; duration: string; videoUrl: string | null; audioUrl: string | null };
 export type Article = { id: number; title: string; excerpt: string; content: string; category: string; author: string; coverImageUrl: string | null; date: string; readTime: string; published?: boolean };
 export type Video = { id: number; title: string; description: string | null; category: string | null; sourceUrl: string; embedUrl: string; thumbnailUrl: string | null; isDirectFile: boolean; createdAt: string; updatedAt: string };
