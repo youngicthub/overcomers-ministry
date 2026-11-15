@@ -62,7 +62,7 @@ export type Article = { id: number; title: string; excerpt: string; content: str
 export type Video = { id: number; title: string; description: string | null; category: string | null; sourceUrl: string; embedUrl: string; thumbnailUrl: string | null; isDirectFile: boolean; createdAt: string; updatedAt: string };
 export type GalleryPhoto = { id: number; url: string; caption: string | null; createdAt: string };
 export type Testimony = { id: number; name: string; content: string; location: string };
-export type LiveStatus = { isLive: boolean; platform: string | null; title: string | null; embedUrl: string | null; nextService: string };
+export type LiveStatus = { isLive: boolean; platform: string | null; title: string | null; message: string | null; embedUrl: string | null; nextService: string };
 export type HomeContent = { devotional: Devotional; events: ChurchEvent[]; sermons: Sermon[]; article: Article | null; videos: Video[]; live: LiveStatus };
 export type HealthStatus = { status: string };
 
@@ -182,6 +182,10 @@ export function getLiveOffer() {
 
 export function getLiveIceServers() {
   return get<LiveIceServer[]>('/api/live/ice-servers');
+}
+
+export function updateLiveMessage(data: { sessionId: string; message: string }) {
+  return mutationRequest<LiveStatus>('POST', '/api/live/message', data);
 }
 
 export function getLiveViewerOffers(sessionId: string) {

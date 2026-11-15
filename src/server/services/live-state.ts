@@ -15,6 +15,7 @@ export type LiveStatus = {
   isLive: boolean;
   platform: string | null;
   title: string | null;
+  message: string | null;
   embedUrl: string | null;
   nextService: string;
 };
@@ -29,6 +30,7 @@ type LiveRecord = {
   offer: LiveSession | null;
   answer: LiveSignal | null;
   title: string | null;
+  message?: string | null;
   startedAt: number | null;
 };
 
@@ -57,7 +59,7 @@ const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
 ];
 
-const EMPTY: LiveRecord = { offer: null, answer: null, title: null, startedAt: null };
+const EMPTY: LiveRecord = { offer: null, answer: null, title: null, message: null, startedAt: null };
 
 function viewerPrefix(sessionId: string) {
   return `live:viewers:${sessionId}:`;
@@ -76,6 +78,7 @@ function toStatus(record: LiveRecord): LiveStatus {
     isLive,
     platform: isLive ? "WebRTC" : null,
     title: isLive ? record.title : null,
+    message: isLive ? record.message ?? null : null,
     embedUrl: null,
     nextService: NEXT_SERVICE,
   };
@@ -102,8 +105,15 @@ export function getLiveIceServers() {
 }
 
 export async function publishOffer(offer: LiveSession, title: string) {
-  await kvSet(KEY, { offer, answer: null, title, startedAt: Date.now() } satisfies LiveRecord);
+  await kvSet(KEY, { offer, answer: null, title, message: null, startedAt: Date.now() } satisfies LiveRecord);
   return { sessionId: offer.sessionId, title, isLive: true };
+}
+
+export async function updateLiveMessage(sessionId: string, message: string) {
+  const record = await read();
+  if (record.offer?.sessionId !== sessionId) return false;
+  await kvSet(KEY, { ...record, message: message || null });
+  return true;
 }
 
 export async function getOffer() {

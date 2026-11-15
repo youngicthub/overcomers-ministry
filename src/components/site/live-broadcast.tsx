@@ -26,6 +26,7 @@ import {
   getLiveViewerOffers,
   submitLiveViewerAnswer,
   submitLiveViewerOffer,
+  updateLiveMessage,
   useGetLiveStatus,
   usePublishLiveOffer,
   useStopLiveSession,
@@ -122,6 +123,9 @@ function MediaAdminStudio() {
   const [cameraReady, setCameraReady] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
   const [title, setTitle] = useState('Sunday Celebration Service');
+  const [messageDraft, setMessageDraft] = useState('');
+  const [savingMessage, setSavingMessage] = useState(false);
+  const [messageNotice, setMessageNotice] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
@@ -272,6 +276,23 @@ function MediaAdminStudio() {
     }
   };
 
+  const saveLiveMessage = async (message: string) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    setSavingMessage(true);
+    setError('');
+    setMessageNotice('');
+    try {
+      await updateLiveMessage({ sessionId, message });
+      setMessageNotice(message ? 'Message is now visible to viewers.' : 'On-screen message cleared.');
+      await queryClient.invalidateQueries({ queryKey: qk.liveStatus });
+    } catch (messageError) {
+      setError(messageError instanceof Error ? messageError.message : 'Could not update the on-screen message.');
+    } finally {
+      setSavingMessage(false);
+    }
+  };
+
   const stopBroadcast = async () => {
     const sessionId = sessionIdRef.current;
     if (viewerPollRef.current) window.clearInterval(viewerPollRef.current);
@@ -389,6 +410,47 @@ function MediaAdminStudio() {
                 </button>
               )}
             </div>
+            <div className="rounded-xl border border-primary-foreground/15 bg-primary-foreground/5 p-5">
+              <label htmlFor="live-message" className="block text-sm font-semibold text-primary-foreground">
+                On-screen message or topic
+                <textarea
+                  id="live-message"
+                  value={messageDraft}
+                  onChange={(event) => {
+                    setMessageDraft(event.target.value);
+                    setMessageNotice('');
+                  }}
+                  maxLength={180}
+                  rows={2}
+                  disabled={!broadcasting || savingMessage}
+                  placeholder="Share a topic, scripture, or announcement with viewers"
+                  className="mt-2 w-full resize-y rounded-xl border border-primary-foreground/15 bg-primary-foreground/10 px-4 py-3 text-sm text-primary-foreground outline-none placeholder:text-primary-foreground/40 focus:border-secondary disabled:opacity-60"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void saveLiveMessage(messageDraft.trim())}
+                  disabled={!broadcasting || savingMessage || !messageDraft.trim()}
+                  className="rounded-full bg-secondary px-4 py-2.5 text-xs font-bold text-primary disabled:opacity-50"
+                >
+                  {savingMessage ? 'Updating…' : 'Show on stream'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMessageDraft('');
+                    void saveLiveMessage('');
+                  }}
+                  disabled={!broadcasting || savingMessage || !status.data?.message}
+                  className="rounded-full border border-primary-foreground/25 px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  Clear message
+                </button>
+                <span className="text-xs text-primary-foreground/60">{messageDraft.length}/180</span>
+              </div>
+              {messageNotice && <p className="mt-3 text-sm text-secondary" role="status">{messageNotice}</p>}
+            </div>
             {(notice || error) && (
               <div className={`flex items-start gap-3 text-sm ${error ? 'text-red-200' : 'text-primary-foreground/75'}`} role="status">
                 {error ? <RefreshCw size={16} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-secondary" />}
@@ -479,7 +541,7 @@ function ViewerExperience() {
           if (!cancelled && peer?.connectionState === 'failed') {
             setConnectionError(hasTurnServer(iceServers)
               ? 'The phone could not connect through the network. Check its internet connection and try again.'
-              : 'This phone network may require a TURN relay. Configure LIVE_TURN_URLS, LIVE_TURN_USERNAME, and LIVE_TURN_CREDENTIAL in Vercel, then try again.');
+              : 'This phone network needs a TURN relay. Ask the broadcast administrator to configure TURN in Vercel.');
             setConnection('error');
           }
         };
@@ -529,18 +591,25 @@ function ViewerExperience() {
 
   return (
     <div className="overflow-hidden rounded-[2rem] bg-primary shadow-xl">
-      <div className="relative aspect-video bg-[#0b1027]">
+      <div className="relative aspect-video overflow-hidden bg-[#0b1027]">
         <video ref={videoRef} autoPlay muted={muted} playsInline controls className={`h-full w-full object-contain ${connection === 'connected' ? 'opacity-100' : 'opacity-0'}`} aria-label="Live service video" />
+        {connection === 'connected' && status.data?.message && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-5 pb-5 pt-12 text-center sm:px-8 sm:pb-7">
+            <p className="mx-auto max-w-3xl whitespace-pre-wrap break-words text-base font-semibold leading-relaxed text-white drop-shadow sm:text-xl">
+              {status.data.message}
+            </p>
+          </div>
+        )}
         {connection !== 'connected' && (
-          <div className="absolute inset-0 grid place-items-center px-6 text-center text-primary-foreground">
-            <div>
+          <div className="absolute inset-0 grid place-items-center overflow-y-auto px-5 py-4 text-center text-primary-foreground sm:px-6">
+            <div className="max-w-lg">
               <div className="mx-auto grid h-16 w-16 place-items-center rounded-full border border-secondary text-secondary">
                 {connection === 'connecting' ? <Loader2 className="animate-spin" size={25} /> : <Radio size={25} />}
               </div>
-              <p className="mt-5 font-display text-2xl">
+              <p className="mt-4 font-display text-xl sm:mt-5 sm:text-2xl">
                 {connection === 'waiting' ? 'Waiting for the service to connect' : connection === 'error' ? 'We could not connect to the live room' : 'Connecting to the live room'}
               </p>
-              <p className="mt-2 text-sm text-primary-foreground/60">
+              <p className="mt-2 text-sm leading-5 text-primary-foreground/60">
                 {connection === 'error'
                   ? connectionError || 'Please check your connection and try again.'
                   : connection === 'waiting'
@@ -551,7 +620,7 @@ function ViewerExperience() {
                 <button
                   type="button"
                   onClick={() => setRetry((attempt) => attempt + 1)}
-                  className="mt-5 rounded-full bg-secondary px-5 py-2.5 text-sm font-bold text-primary"
+                  className="mt-4 rounded-full bg-secondary px-5 py-2.5 text-sm font-bold text-primary sm:mt-5"
                 >
                   Try connecting again
                 </button>
