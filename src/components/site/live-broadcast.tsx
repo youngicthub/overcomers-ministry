@@ -34,6 +34,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 async function waitForIceGathering(
   peer: RTCPeerConnection,
+  candidateType: 'srflx' | 'relay',
 ): Promise<RTCSessionDescriptionInit> {
   if (peer.iceGatheringState === 'complete' && peer.localDescription) {
     return peer.localDescription;
@@ -52,7 +53,7 @@ async function waitForIceGathering(
       }
     };
     const checkCandidate = (event: RTCPeerConnectionIceEvent) => {
-      if (event.candidate?.type === 'srflx') {
+      if (event.candidate?.type === candidateType) {
         cleanup();
         resolve();
       }
@@ -60,7 +61,7 @@ async function waitForIceGathering(
     const timeout = window.setTimeout(() => {
       cleanup();
       resolve();
-    }, 4000);
+    }, 8000);
     peer.addEventListener('icegatheringstatechange', checkState);
     peer.addEventListener('icecandidate', checkCandidate);
     checkState();
@@ -70,6 +71,17 @@ async function waitForIceGathering(
     throw new Error('The browser could not finish preparing the live connection.');
   }
   return peer.localDescription;
+}
+
+function hasTurnServer(iceServers: RTCIceServer[]): boolean {
+  return iceServers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'));
+  });
+}
+
+function preferredCandidateType(iceServers: RTCIceServer[]): 'srflx' | 'relay' {
+  return hasTurnServer(iceServers) ? 'relay' : 'srflx';
 }
 
 function BroadcastHeader({ isLive }: { isLive: boolean }) {
@@ -225,7 +237,10 @@ function MediaAdminStudio() {
                 stream.getTracks().forEach((track) => viewerPeer.addTrack(track, stream));
                 const answer = await viewerPeer.createAnswer();
                 await viewerPeer.setLocalDescription(answer);
-                const localDescription = await waitForIceGathering(viewerPeer);
+                const localDescription = await waitForIceGathering(
+                  viewerPeer,
+                  preferredCandidateType(iceServersRef.current),
+                );
                 if (!localDescription.type || !localDescription.sdp) {
                   throw new Error('Could not prepare the viewer connection.');
                 }
@@ -417,19 +432,25 @@ function MediaAdminStudio() {
 
 function ViewerExperience() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const [connection, setConnection] = useState<'idle' | 'connecting' | 'connected' | 'waiting' | 'error'>('idle');
+  const [connectionError, setConnectionError] = useState('');
+  const [muted, setMuted] = useState(true);
+  const [retry, setRetry] = useState(0);
   const status = useGetLiveStatus({ refetchInterval: 5000 });
 
   useEffect(() => {
     let cancelled = false;
     let peer: RTCPeerConnection | null = null;
     let answerPoll: number | null = null;
+    let remoteStream: MediaStream | null = null;
     const connect = async () => {
       if (!status.data?.isLive) {
         setConnection('idle');
         return;
       }
       setConnection('connecting');
+      setConnectionError('');
       try {
         const [offer, iceServers] = await Promise.all([getLiveOffer(), getLiveIceServers()]);
         if (!offer?.sessionId) {
@@ -441,15 +462,30 @@ function ViewerExperience() {
         peer.addTransceiver('video', { direction: 'recvonly' });
         peer.addTransceiver('audio', { direction: 'recvonly' });
         peer.ontrack = (event) => {
-          if (videoRef.current && event.streams[0]) videoRef.current.srcObject = event.streams[0];
+          remoteStream = event.streams[0] ?? remoteStream ?? new MediaStream();
+          if (!event.streams[0] && !remoteStream.getTracks().some((track) => track.id === event.track.id)) {
+            remoteStream.addTrack(event.track);
+          }
+          remoteStreamRef.current = remoteStream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = remoteStream;
+            void videoRef.current.play().catch(() => {
+              if (!cancelled) setConnectionError('Tap the video to start playback.');
+            });
+          }
           setConnection('connected');
         };
         peer.onconnectionstatechange = () => {
-          if (!cancelled && peer?.connectionState === 'failed') setConnection('error');
+          if (!cancelled && peer?.connectionState === 'failed') {
+            setConnectionError(hasTurnServer(iceServers)
+              ? 'The phone could not connect through the network. Check its internet connection and try again.'
+              : 'This phone network may require a TURN relay. Configure LIVE_TURN_URLS, LIVE_TURN_USERNAME, and LIVE_TURN_CREDENTIAL in Vercel, then try again.');
+            setConnection('error');
+          }
         };
         const viewerOffer = await peer.createOffer();
         await peer.setLocalDescription(viewerOffer);
-        const localDescription = await waitForIceGathering(peer);
+        const localDescription = await waitForIceGathering(peer, preferredCandidateType(iceServers));
         if (!localDescription.type || !localDescription.sdp) throw new Error('Could not prepare the viewer connection.');
         await submitLiveViewerOffer({
           sessionId: offer.sessionId,
@@ -474,8 +510,11 @@ function ViewerExperience() {
             });
           }, 1000);
         }
-      } catch {
-        if (!cancelled) setConnection('error');
+      } catch (error) {
+        if (!cancelled) {
+          setConnectionError(error instanceof Error ? error.message : 'Please check your connection and try again.');
+          setConnection('error');
+        }
       }
     };
     void connect();
@@ -484,13 +523,14 @@ function ViewerExperience() {
       if (answerPoll) window.clearInterval(answerPoll);
       peer?.close();
       if (videoRef.current) videoRef.current.srcObject = null;
+      remoteStreamRef.current = null;
     };
-  }, [status.data?.isLive]);
+  }, [retry, status.data?.isLive]);
 
   return (
     <div className="overflow-hidden rounded-[2rem] bg-primary shadow-xl">
       <div className="relative aspect-video bg-[#0b1027]">
-        <video ref={videoRef} autoPlay playsInline controls className={`h-full w-full object-contain ${connection === 'connected' ? 'opacity-100' : 'opacity-0'}`} aria-label="Live service video" />
+        <video ref={videoRef} autoPlay muted={muted} playsInline controls className={`h-full w-full object-contain ${connection === 'connected' ? 'opacity-100' : 'opacity-0'}`} aria-label="Live service video" />
         {connection !== 'connected' && (
           <div className="absolute inset-0 grid place-items-center px-6 text-center text-primary-foreground">
             <div>
@@ -501,8 +541,21 @@ function ViewerExperience() {
                 {connection === 'waiting' ? 'Waiting for the service to connect' : connection === 'error' ? 'We could not connect to the live room' : 'Connecting to the live room'}
               </p>
               <p className="mt-2 text-sm text-primary-foreground/60">
-                {connection === 'error' ? 'Please refresh and try again.' : 'The live video will appear here when the broadcaster is ready.'}
+                {connection === 'error'
+                  ? connectionError || 'Please check your connection and try again.'
+                  : connection === 'waiting'
+                    ? 'The live video will appear here when the broadcaster is ready.'
+                    : 'The live video will appear here when the broadcaster is ready.'}
               </p>
+              {connection === 'error' && (
+                <button
+                  type="button"
+                  onClick={() => setRetry((attempt) => attempt + 1)}
+                  className="mt-5 rounded-full bg-secondary px-5 py-2.5 text-sm font-bold text-primary"
+                >
+                  Try connecting again
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -512,7 +565,14 @@ function ViewerExperience() {
           <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-secondary"><span className={`h-2 w-2 rounded-full ${status.data?.isLive ? 'animate-pulse bg-accent' : 'bg-primary-foreground/30'}`} />{status.data?.isLive ? 'Live now' : 'Currently offline'}</span>
           <h2 className="mt-2 font-display text-2xl text-primary-foreground">{status.data?.title || 'Sunday worship at Overcomers'}</h2>
         </div>
-        <Link href="/sermons" className="inline-flex items-center gap-2 text-sm font-bold text-secondary">Browse messages <Video size={15} /></Link>
+        <div className="flex flex-wrap gap-4">
+          {connection === 'connected' && (
+            <button type="button" onClick={() => setMuted((isMuted) => !isMuted)} className="text-sm font-bold text-secondary">
+              {muted ? 'Enable audio' : 'Mute audio'}
+            </button>
+          )}
+          <Link href="/sermons" className="inline-flex items-center gap-2 text-sm font-bold text-secondary">Browse messages <Video size={15} /></Link>
+        </div>
       </div>
     </div>
   );
