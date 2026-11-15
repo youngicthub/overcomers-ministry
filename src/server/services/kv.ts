@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { appKvTable, db } from "../db";
 
 export async function kvGet<T>(key: string): Promise<T | null> {
@@ -15,6 +15,15 @@ export async function kvSet(key: string, value: unknown): Promise<void> {
 
 export async function kvDelete(key: string): Promise<void> {
   await db.delete(appKvTable).where(eq(appKvTable.key, key));
+}
+
+export async function kvGetByPrefix<T>(prefix: string): Promise<T[]> {
+  const rows = await db.select({ value: appKvTable.value }).from(appKvTable).where(like(appKvTable.key, `${prefix}%`));
+  return rows.map((row) => row.value as T);
+}
+
+export async function kvDeleteByPrefix(prefix: string): Promise<void> {
+  await db.delete(appKvTable).where(like(appKvTable.key, `${prefix}%`));
 }
 
 /** Atomically claims a key. Exactly one caller (across ALL serverless

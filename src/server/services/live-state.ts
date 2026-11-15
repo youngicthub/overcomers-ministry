@@ -1,9 +1,13 @@
-import { kvGet, kvSet } from "./kv";
+import { kvDeleteByPrefix, kvGet, kvGetByPrefix, kvSet } from "./kv";
 
 export type LiveSignal = {
   sessionId: string;
   type: string;
   sdp: string;
+};
+
+export type LiveSession = {
+  sessionId: string;
 };
 
 export type LiveStatus = {
@@ -21,18 +25,38 @@ const NEXT_SERVICE = "Sunrise Service · Sunday at 7:30 AM";
 // answer posted by a viewer would land on different instances, so the state
 // is kept in Postgres (app_kv) instead.
 type LiveRecord = {
-  offer: LiveSignal | null;
+  offer: LiveSession | null;
   answer: LiveSignal | null;
   title: string | null;
   startedAt: number | null;
+};
+
+export type LiveViewerSignal = {
+  sessionId: string;
+  viewerId: string;
+  type: string;
+  sdp: string;
+};
+
+type LiveViewerRecord = {
+  sessionId: string;
+  viewerId: string;
+  offer: Pick<LiveSignal, "type" | "sdp">;
+  answer: Pick<LiveSignal, "type" | "sdp"> | null;
+  createdAt: number;
 };
 
 const KEY = "live";
 // A broadcast that was never explicitly stopped (browser closed, etc.) stops
 // counting as "live" after this long.
 const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
+const VIEWER_SIGNAL_TTL_MS = 5 * 60 * 1000;
 
 const EMPTY: LiveRecord = { offer: null, answer: null, title: null, startedAt: null };
+
+function viewerPrefix(sessionId: string) {
+  return `live:viewers:${sessionId}:`;
+}
 
 async function read(): Promise<LiveRecord> {
   const record = await kvGet<LiveRecord>(KEY);
@@ -56,7 +80,7 @@ export async function getLiveStatus(): Promise<LiveStatus> {
   return toStatus(await read());
 }
 
-export async function publishOffer(offer: LiveSignal, title: string) {
+export async function publishOffer(offer: LiveSession, title: string) {
   await kvSet(KEY, { offer, answer: null, title, startedAt: Date.now() } satisfies LiveRecord);
   return { sessionId: offer.sessionId, title, isLive: true };
 }
@@ -78,9 +102,53 @@ export async function publishAnswer(answer: LiveSignal) {
   return true;
 }
 
+export async function publishViewerOffer(signal: LiveViewerSignal) {
+  const record = await read();
+  if (record.offer?.sessionId !== signal.sessionId) return false;
+  const viewer: LiveViewerRecord = {
+    sessionId: signal.sessionId,
+    viewerId: signal.viewerId,
+    offer: { type: signal.type, sdp: signal.sdp },
+    answer: null,
+    createdAt: Date.now(),
+  };
+  await kvSet(`${viewerPrefix(signal.sessionId)}${signal.viewerId}`, viewer);
+  return true;
+}
+
+export async function getPendingViewerOffers(sessionId: string) {
+  const record = await read();
+  if (record.offer?.sessionId !== sessionId) return [];
+  const viewers = await kvGetByPrefix<LiveViewerRecord>(viewerPrefix(sessionId));
+  return viewers
+    .filter((viewer) => !viewer.answer && Date.now() - viewer.createdAt < VIEWER_SIGNAL_TTL_MS)
+    .map(({ viewerId, offer }) => ({ sessionId, viewerId, ...offer }));
+}
+
+export async function getViewerAnswer(sessionId: string, viewerId: string) {
+  const record = await read();
+  if (record.offer?.sessionId !== sessionId) return null;
+  const [viewer] = await kvGetByPrefix<LiveViewerRecord>(`${viewerPrefix(sessionId)}${viewerId}`);
+  return viewer?.sessionId === sessionId ? viewer.answer : null;
+}
+
+export async function publishViewerAnswer(signal: LiveViewerSignal) {
+  const record = await read();
+  if (record.offer?.sessionId !== signal.sessionId) return false;
+  const key = `${viewerPrefix(signal.sessionId)}${signal.viewerId}`;
+  const [viewer] = await kvGetByPrefix<LiveViewerRecord>(key);
+  if (!viewer || viewer.sessionId !== signal.sessionId) return false;
+  await kvSet(key, {
+    ...viewer,
+    answer: { type: signal.type, sdp: signal.sdp },
+  } satisfies LiveViewerRecord);
+  return true;
+}
+
 export async function stopLive(sessionId: string) {
   const record = await read();
   if (record.offer?.sessionId !== sessionId) return false;
+  await kvDeleteByPrefix(viewerPrefix(sessionId));
   await kvSet(KEY, EMPTY);
   return true;
 }

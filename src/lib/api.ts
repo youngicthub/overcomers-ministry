@@ -168,9 +168,29 @@ export function useCreateContactMessage(options?: UseMutationOptions<Receipt, Ap
 // ---- Live signaling (WebRTC broadcast studio + viewer) ----
 
 export type LiveSignal = { sessionId: string; type: string; sdp: string };
+export type LiveSession = { sessionId: string };
+export type LiveViewerSignal = LiveSignal & { viewerId: string };
 
 export function getLiveOffer() {
-  return get<LiveSignal | null>('/api/live/offer');
+  return get<LiveSession | null>('/api/live/offer');
+}
+
+export function getLiveViewerOffers(sessionId: string) {
+  return get<LiveViewerSignal[]>(withQuery('/api/live/viewers', { sessionId }));
+}
+
+export function submitLiveViewerOffer(data: LiveViewerSignal) {
+  return mutationRequest('POST', '/api/live/viewers', data);
+}
+
+export function getLiveViewerAnswer(sessionId: string, viewerId: string) {
+  return get<Pick<LiveSignal, 'type' | 'sdp'> | null>(
+    withQuery('/api/live/viewers/answer', { sessionId, viewerId }),
+  );
+}
+
+export function submitLiveViewerAnswer(data: LiveViewerSignal) {
+  return mutationRequest('POST', '/api/live/viewers/answer', data);
 }
 
 export function getLiveAnswer(sessionId: string) {
@@ -181,7 +201,7 @@ export function submitLiveAnswer(data: LiveSignal) {
   return mutationRequest('POST', '/api/live/answer', data);
 }
 
-export function usePublishLiveOffer(options?: UseMutationOptions<{ sessionId: string; title: string; isLive: boolean }, ApiError, LiveSignal & { title: string }>) {
+export function usePublishLiveOffer(options?: UseMutationOptions<{ sessionId: string; title: string; isLive: boolean }, ApiError, LiveSession & { title: string }>) {
   return useMutation({ mutationFn: (data) => mutationRequest('POST', '/api/live/offer', data), ...options });
 }
 

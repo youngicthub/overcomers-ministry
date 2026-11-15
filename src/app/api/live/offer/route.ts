@@ -5,8 +5,6 @@ import { getOffer, publishOffer } from "@/server/services/live-state";
 
 const PublishLiveOfferBody = z.object({
   sessionId: z.string().min(1),
-  type: z.string().min(1),
-  sdp: z.string().min(1),
   title: z.string().min(1),
 });
 

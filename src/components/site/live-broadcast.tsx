@@ -21,9 +21,11 @@ import {
 } from 'lucide-react';
 import {
   qk,
-  getLiveAnswer,
   getLiveOffer,
-  submitLiveAnswer,
+  getLiveViewerAnswer,
+  getLiveViewerOffers,
+  submitLiveViewerAnswer,
+  submitLiveViewerOffer,
   useGetLiveStatus,
   usePublishLiveOffer,
   useStopLiveSession,
@@ -85,9 +87,12 @@ function BroadcastHeader({ isLive }: { isLive: boolean }) {
 function MediaAdminStudio() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const peerRef = useRef<RTCPeerConnection | null>(null);
-  const answerPollRef = useRef<number | null>(null);
+  const viewerPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const viewerPollRef = useRef<number | null>(null);
+  const processingViewersRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
   const [cameraReady, setCameraReady] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
   const [title, setTitle] = useState('Sunday Celebration Service');
@@ -99,6 +104,23 @@ function MediaAdminStudio() {
   const stopSession = useStopLiveSession();
   const status = useGetLiveStatus({ refetchInterval: 5000 });
 
+  const refreshCameras = async () => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    setCameras(devices.filter((device) => device.kind === 'videoinput'));
+  };
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const updateCameras = () => {
+      void refreshCameras().catch((cameraError: unknown) => {
+        setError(cameraError instanceof Error ? cameraError.message : 'Could not list available cameras.');
+      });
+    };
+    updateCameras();
+    navigator.mediaDevices.addEventListener('devicechange', updateCameras);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', updateCameras);
+  }, []);
+
   const openCamera = async () => {
     setError('');
     try {
@@ -106,17 +128,32 @@ function MediaAdminStudio() {
         throw new Error('Camera access is not available in this browser.');
       }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : {}),
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: true,
       });
       streamRef.current = stream;
+      void refreshCameras().catch((cameraError: unknown) => {
+        setError(cameraError instanceof Error ? cameraError.message : 'Could not list available cameras.');
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
       setCameraReady(true);
       setNotice('Camera and microphone are ready.');
     } catch (cameraError) {
-      setError(cameraError instanceof Error ? cameraError.message : 'Camera access was denied.');
+      void refreshCameras().catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : 'Could not list available cameras.');
+      });
+      const name = cameraError instanceof Error ? cameraError.name : '';
+      setError(name === 'NotReadableError'
+        ? 'The selected camera is already in use. Close the other app using it or choose another camera below.'
+        : name === 'NotFoundError'
+          ? 'No camera was found. Connect a camera or choose an available device.'
+          : cameraError instanceof Error ? cameraError.message : 'Camera access was denied.');
     }
   };
 
@@ -136,51 +173,75 @@ function MediaAdminStudio() {
         await openCamera();
         stream = streamRef.current;
       }
-      if (!stream) throw new Error('Camera access is required before going live.');
-
-      const peer = new RTCPeerConnection({ iceServers });
-      peerRef.current = peer;
-      stream.getTracks().forEach((track) => peer.addTrack(track, stream as MediaStream));
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      const localDescription = await waitForIceGathering(peer);
-      if (!localDescription.sdp || !localDescription.type) {
-        throw new Error('The browser could not prepare the live connection.');
-      }
+      if (!stream) return;
 
       const sessionId = crypto.randomUUID();
       sessionIdRef.current = sessionId;
       await publishOffer.mutateAsync({
         sessionId,
         title: title.trim() || 'Live from Overcomers',
-        type: localDescription.type,
-        sdp: localDescription.sdp,
       });
       setBroadcasting(true);
       setNotice('You are live. Keep this window open while you broadcast.');
       await queryClient.invalidateQueries({ queryKey: qk.liveStatus });
 
-      answerPollRef.current = window.setInterval(async () => {
-        if (peer.currentRemoteDescription) return;
-        const answer = await getLiveAnswer(sessionId).catch(() => null);
-        if (answer?.type && answer.sdp) {
-          await peer.setRemoteDescription({ type: answer.type as RTCSdpType, sdp: answer.sdp });
-          if (answerPollRef.current) window.clearInterval(answerPollRef.current);
-          setNotice('A viewer has connected to the live service.');
-        }
+      viewerPollRef.current = window.setInterval(() => {
+        if (processingViewersRef.current) return;
+        processingViewersRef.current = true;
+        void getLiveViewerOffers(sessionId)
+          .then(async (offers) => {
+            for (const viewerOffer of offers) {
+              if (viewerPeersRef.current.has(viewerOffer.viewerId)) continue;
+              const viewerPeer = new RTCPeerConnection({ iceServers });
+              viewerPeersRef.current.set(viewerOffer.viewerId, viewerPeer);
+              viewerPeer.onconnectionstatechange = () => {
+                if (viewerPeer.connectionState === 'failed' || viewerPeer.connectionState === 'closed') {
+                  viewerPeersRef.current.delete(viewerOffer.viewerId);
+                  viewerPeer.close();
+                }
+              };
+              try {
+                await viewerPeer.setRemoteDescription({ type: viewerOffer.type as RTCSdpType, sdp: viewerOffer.sdp });
+                stream.getTracks().forEach((track) => viewerPeer.addTrack(track, stream));
+                const answer = await viewerPeer.createAnswer();
+                await viewerPeer.setLocalDescription(answer);
+                const localDescription = await waitForIceGathering(viewerPeer);
+                if (!localDescription.type || !localDescription.sdp) {
+                  throw new Error('Could not prepare the viewer connection.');
+                }
+                await submitLiveViewerAnswer({
+                  sessionId,
+                  viewerId: viewerOffer.viewerId,
+                  type: localDescription.type,
+                  sdp: localDescription.sdp,
+                });
+                setNotice('A viewer has connected to the live service.');
+              } catch (viewerError) {
+                viewerPeer.close();
+                viewerPeersRef.current.delete(viewerOffer.viewerId);
+                setError(viewerError instanceof Error
+                  ? `A viewer could not connect: ${viewerError.message}`
+                  : 'A viewer could not connect to the live service.');
+              }
+            }
+          })
+          .catch((pollError: unknown) => {
+            setError(pollError instanceof Error ? pollError.message : 'Could not check for viewers.');
+          })
+          .finally(() => {
+            processingViewersRef.current = false;
+          });
       }, 1000);
     } catch (broadcastError) {
-      peerRef.current?.close();
-      peerRef.current = null;
       setError(broadcastError instanceof Error ? broadcastError.message : 'The broadcast could not start.');
     }
   };
 
   const stopBroadcast = async () => {
     const sessionId = sessionIdRef.current;
-    if (answerPollRef.current) window.clearInterval(answerPollRef.current);
-    peerRef.current?.close();
-    peerRef.current = null;
+    if (viewerPollRef.current) window.clearInterval(viewerPollRef.current);
+    viewerPeersRef.current.forEach((peer) => peer.close());
+    viewerPeersRef.current.clear();
     if (sessionId) {
       await stopSession.mutateAsync({ sessionId });
     }
@@ -205,8 +266,9 @@ function MediaAdminStudio() {
   const whatsappShareUrl = `https://wa.me/?text=${encodeURIComponent(`We're live now — watch here: ${shareUrl}`)}`;
 
   useEffect(() => () => {
-    if (answerPollRef.current) window.clearInterval(answerPollRef.current);
-    peerRef.current?.close();
+    if (viewerPollRef.current) window.clearInterval(viewerPollRef.current);
+    viewerPeersRef.current.forEach((peer) => peer.close());
+    viewerPeersRef.current.clear();
     stopLocalMedia();
   }, []);
 
@@ -254,6 +316,24 @@ function MediaAdminStudio() {
                 placeholder="e.g. Sunday Celebration Service"
               />
             </label>
+            {cameras.length > 0 && (
+              <label className="block text-sm font-semibold text-primary-foreground">
+                Camera
+                <select
+                  value={selectedCameraId}
+                  onChange={(event) => setSelectedCameraId(event.target.value)}
+                  disabled={cameraReady || broadcasting}
+                  className="mt-2 w-full rounded-xl border border-primary-foreground/15 bg-primary px-4 py-3 text-sm text-primary-foreground outline-none focus:border-secondary disabled:opacity-60"
+                >
+                  <option value="">Default camera</option>
+                  {cameras.map((camera, index) => (
+                    <option key={camera.deviceId} value={camera.deviceId}>
+                      {camera.label || `Camera ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="flex flex-wrap gap-3">
               {!cameraReady ? (
                 <button type="button" onClick={openCamera} className="inline-flex items-center gap-2 rounded-full bg-secondary px-5 py-3 text-sm font-bold text-primary">
@@ -325,6 +405,7 @@ function ViewerExperience() {
   useEffect(() => {
     let cancelled = false;
     let peer: RTCPeerConnection | null = null;
+    let answerPoll: number | null = null;
     const connect = async () => {
       if (!status.data?.isLive) {
         setConnection('idle');
@@ -333,22 +414,48 @@ function ViewerExperience() {
       setConnection('connecting');
       try {
         const offer = await getLiveOffer();
-        if (!offer?.sessionId || !offer.type || !offer.sdp) {
+        if (!offer?.sessionId) {
           setConnection('waiting');
           return;
         }
+        const viewerId = crypto.randomUUID();
         peer = new RTCPeerConnection({ iceServers });
+        peer.addTransceiver('video', { direction: 'recvonly' });
+        peer.addTransceiver('audio', { direction: 'recvonly' });
         peer.ontrack = (event) => {
-          if (videoRef.current) videoRef.current.srcObject = event.streams[0];
+          if (videoRef.current && event.streams[0]) videoRef.current.srcObject = event.streams[0];
           setConnection('connected');
         };
-        await peer.setRemoteDescription({ type: offer.type as RTCSdpType, sdp: offer.sdp });
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
+        peer.onconnectionstatechange = () => {
+          if (!cancelled && peer?.connectionState === 'failed') setConnection('error');
+        };
+        const viewerOffer = await peer.createOffer();
+        await peer.setLocalDescription(viewerOffer);
         const localDescription = await waitForIceGathering(peer);
         if (!localDescription.type || !localDescription.sdp) throw new Error('Could not prepare the viewer connection.');
-        await submitLiveAnswer({ sessionId: offer.sessionId, type: localDescription.type, sdp: localDescription.sdp });
-        if (!cancelled && connection !== 'connected') setConnection('connecting');
+        await submitLiveViewerOffer({
+          sessionId: offer.sessionId,
+          viewerId,
+          type: localDescription.type,
+          sdp: localDescription.sdp,
+        });
+        const pollAnswer = async () => {
+          const answer = await getLiveViewerAnswer(offer.sessionId, viewerId);
+          if (cancelled || !answer?.type || !answer.sdp || !peer) return false;
+          await peer.setRemoteDescription({ type: answer.type as RTCSdpType, sdp: answer.sdp });
+          return true;
+        };
+        const answered = await pollAnswer();
+        if (!answered && !cancelled) {
+          answerPoll = window.setInterval(() => {
+            void pollAnswer().then((received) => {
+              if (received && answerPoll) window.clearInterval(answerPoll);
+            }).catch(() => {
+              if (!cancelled) setConnection('error');
+              if (answerPoll) window.clearInterval(answerPoll);
+            });
+          }, 1000);
+        }
       } catch {
         if (!cancelled) setConnection('error');
       }
@@ -356,6 +463,7 @@ function ViewerExperience() {
     void connect();
     return () => {
       cancelled = true;
+      if (answerPoll) window.clearInterval(answerPoll);
       peer?.close();
       if (videoRef.current) videoRef.current.srcObject = null;
     };
