@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   qk,
+  getLiveIceServers,
   getLiveOffer,
   getLiveViewerAnswer,
   getLiveViewerOffers,
@@ -31,8 +32,6 @@ import {
 } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 
-const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-
 async function waitForIceGathering(
   peer: RTCPeerConnection,
 ): Promise<RTCSessionDescriptionInit> {
@@ -41,15 +40,30 @@ async function waitForIceGathering(
   }
 
   await new Promise<void>((resolve) => {
-    const timeout = window.setTimeout(resolve, 4000);
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      peer.removeEventListener('icegatheringstatechange', checkState);
+      peer.removeEventListener('icecandidate', checkCandidate);
+    };
     const checkState = () => {
       if (peer.iceGatheringState === 'complete') {
-        window.clearTimeout(timeout);
-        peer.removeEventListener('icegatheringstatechange', checkState);
+        cleanup();
         resolve();
       }
     };
+    const checkCandidate = (event: RTCPeerConnectionIceEvent) => {
+      if (event.candidate?.type === 'srflx') {
+        cleanup();
+        resolve();
+      }
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      resolve();
+    }, 4000);
     peer.addEventListener('icegatheringstatechange', checkState);
+    peer.addEventListener('icecandidate', checkCandidate);
+    checkState();
   });
 
   if (!peer.localDescription) {
@@ -87,6 +101,7 @@ function MediaAdminStudio() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const viewerPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const iceServersRef = useRef<RTCIceServer[]>([]);
   const viewerPollRef = useRef<number | null>(null);
   const processingViewersRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
@@ -179,6 +194,7 @@ function MediaAdminStudio() {
       }
       if (!stream) return;
 
+      iceServersRef.current = await getLiveIceServers();
       const sessionId = crypto.randomUUID();
       sessionIdRef.current = sessionId;
       await publishOffer.mutateAsync({
@@ -196,7 +212,7 @@ function MediaAdminStudio() {
           .then(async (offers) => {
             for (const viewerOffer of offers) {
               if (viewerPeersRef.current.has(viewerOffer.viewerId)) continue;
-              const viewerPeer = new RTCPeerConnection({ iceServers });
+              const viewerPeer = new RTCPeerConnection({ iceServers: iceServersRef.current });
               viewerPeersRef.current.set(viewerOffer.viewerId, viewerPeer);
               viewerPeer.onconnectionstatechange = () => {
                 if (viewerPeer.connectionState === 'failed' || viewerPeer.connectionState === 'closed') {
@@ -415,7 +431,7 @@ function ViewerExperience() {
       }
       setConnection('connecting');
       try {
-        const offer = await getLiveOffer();
+        const [offer, iceServers] = await Promise.all([getLiveOffer(), getLiveIceServers()]);
         if (!offer?.sessionId) {
           setConnection('waiting');
           return;

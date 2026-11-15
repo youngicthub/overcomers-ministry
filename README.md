@@ -77,5 +77,5 @@ Behaviour changes to be aware of:
 ## 4. Known limitations (carried over from the original)
 
 - **Events, ministries and testimonies** are defined in code (`src/server/content.ts`). The three sample event dates are in September 2026 and now in the past; edit them there.
-- **Live broadcast** is a single WebRTC peer-to-peer connection with Google STUN only: it supports one viewer at a time and can fail behind strict firewalls (no TURN server). For a real congregation stream, embed YouTube Live or use a streaming service instead.
+- **Live broadcast** uses a separate WebRTC connection per viewer. STUN is used by default; networks that block direct peer connections require a TURN provider. Configure `LIVE_TURN_URLS` (comma-separated), `LIVE_TURN_USERNAME`, and `LIVE_TURN_CREDENTIAL` in Vercel to enable TURN relay. Use credentials intended for browser clients and monitor provider usage; WebRTC clients receive these credentials. Direct peer-to-peer streaming is not an SFU and is not suitable for large audiences.
 - **Social links** in the footer are placeholder buttons; the address, phone, email and bank details on Give/Contact are placeholder text.

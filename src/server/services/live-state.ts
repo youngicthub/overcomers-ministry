@@ -1,4 +1,5 @@
 import { kvDeleteByPrefix, kvGet, kvGetByPrefix, kvSet } from "./kv";
+import { ConfigError } from "@/server/lib/config";
 
 export type LiveSignal = {
   sessionId: string;
@@ -51,6 +52,10 @@ const KEY = "live";
 // counting as "live" after this long.
 const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
 const VIEWER_SIGNAL_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+];
 
 const EMPTY: LiveRecord = { offer: null, answer: null, title: null, startedAt: null };
 
@@ -78,6 +83,22 @@ function toStatus(record: LiveRecord): LiveStatus {
 
 export async function getLiveStatus(): Promise<LiveStatus> {
   return toStatus(await read());
+}
+
+export function getLiveIceServers() {
+  const urls = process.env.LIVE_TURN_URLS?.split(",").map((url) => url.trim()).filter(Boolean) ?? [];
+  if (urls.length === 0) return DEFAULT_ICE_SERVERS;
+
+  const username = process.env.LIVE_TURN_USERNAME;
+  const credential = process.env.LIVE_TURN_CREDENTIAL;
+  if (!username || !credential) {
+    throw new ConfigError("LIVE_TURN_URLS requires LIVE_TURN_USERNAME and LIVE_TURN_CREDENTIAL.");
+  }
+
+  return [
+    ...DEFAULT_ICE_SERVERS,
+    { urls, username, credential },
+  ];
 }
 
 export async function publishOffer(offer: LiveSession, title: string) {

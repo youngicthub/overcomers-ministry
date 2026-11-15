@@ -170,9 +170,18 @@ export function useCreateContactMessage(options?: UseMutationOptions<Receipt, Ap
 export type LiveSignal = { sessionId: string; type: string; sdp: string };
 export type LiveSession = { sessionId: string };
 export type LiveViewerSignal = LiveSignal & { viewerId: string };
+export type LiveIceServer = {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+};
 
 export function getLiveOffer() {
   return get<LiveSession | null>('/api/live/offer');
+}
+
+export function getLiveIceServers() {
+  return get<LiveIceServer[]>('/api/live/ice-servers');
 }
 
 export function getLiveViewerOffers(sessionId: string) {
