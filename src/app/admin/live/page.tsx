@@ -1,5 +1,5 @@
-import { LiveBroadcastPage } from '@/components/site/live-broadcast';
+import { LiveBroadcastStudioPage } from '@/components/site/live-broadcast';
 
 export default function Page() {
-  return <LiveBroadcastPage />;
+  return <LiveBroadcastStudioPage />;
 }

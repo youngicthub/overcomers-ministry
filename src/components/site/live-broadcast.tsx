@@ -9,7 +9,6 @@ import {
   Check,
   Copy,
   Loader2,
-  LogIn,
   LogOut,
   Play,
   Radio,
@@ -99,6 +98,7 @@ function MediaAdminStudio() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState('/live');
   const queryClient = useQueryClient();
   const publishOffer = usePublishLiveOffer();
   const stopSession = useStopLiveSession();
@@ -119,6 +119,10 @@ function MediaAdminStudio() {
     updateCameras();
     navigator.mediaDevices.addEventListener('devicechange', updateCameras);
     return () => navigator.mediaDevices.removeEventListener('devicechange', updateCameras);
+  }, []);
+
+  useEffect(() => {
+    setShareUrl(`${window.location.origin}/live`);
   }, []);
 
   const openCamera = async () => {
@@ -250,8 +254,6 @@ function MediaAdminStudio() {
     setNotice('The broadcast has ended.');
     await queryClient.invalidateQueries({ queryKey: qk.liveStatus });
   };
-
-  const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/live` : '/live';
 
   const copyShareLink = async () => {
     try {
@@ -501,41 +503,22 @@ function ViewerExperience() {
 }
 
 export function LiveBroadcastPage() {
-  const [adminSession, setAdminSession] = useState<{ admin: { id: string; name: string } } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void fetch('/api/admin/session', { credentials: 'include' })
-      .then(async (response) => response.ok ? response.json() as Promise<{ admin: { id: string; name: string } }> : null)
-      .then((session) => { if (active) setAdminSession(session); })
-      .catch(() => { if (active) setAdminSession(null); });
-    return () => { active = false; };
-  }, []);
-
-  const isMediaAdmin = Boolean(adminSession);
-
   return (
     <>
       <section className="bg-primary px-5 py-16 text-primary-foreground sm:py-20 lg:px-8">
         <div className="mx-auto max-w-7xl">
           <div className="mb-4 flex items-center gap-3 text-secondary"><span className="gold-rule" /><span className="eyebrow">Live from Overcomers</span></div>
           <h1 className="max-w-3xl font-display text-4xl leading-[1.08] sm:text-6xl">The room is open when we gather.</h1>
-          <p className="mt-5 max-w-2xl text-base leading-7 text-primary-foreground/70">Join a live message or service from wherever you are, or sign in as a Media Admin to bring the room online.</p>
+          <p className="mt-5 max-w-2xl text-base leading-7 text-primary-foreground/70">Watch a live message or service from wherever you are.</p>
         </div>
       </section>
-      {isMediaAdmin ? (
-        <MediaAdminStudio />
-      ) : (
-        <section className="mx-auto max-w-5xl px-5 py-16 sm:py-24 lg:px-8">
-          <ViewerExperience />
-          <div className="mt-8 rounded-2xl border border-border bg-card p-7 text-center">
-            <ShieldCheck className="mx-auto text-secondary" size={25} />
-            <h2 className="mt-4 font-display text-2xl text-primary">Are you leading the broadcast?</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">Use the admin access token and on-screen OTP to create or open an individual Media Admin account.</p>
-            <Link href="/admin/login" className="mt-6 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-bold text-primary-foreground"><LogIn size={16} /> Sign in as Media Admin</Link>
-          </div>
-        </section>
-      )}
+      <section className="mx-auto max-w-5xl px-5 py-16 sm:py-24 lg:px-8">
+        <ViewerExperience />
+      </section>
     </>
   );
+}
+
+export function LiveBroadcastStudioPage() {
+  return <MediaAdminStudio />;
 }

@@ -858,6 +858,14 @@ export function AdminDashboardPage() {
         <div className="mb-4 flex items-center gap-3 text-accent"><span className="gold-rule" /><span className="eyebrow">Media Admin dashboard</span></div>
         <h1 className="font-display text-4xl leading-tight text-primary">Welcome, {session.admin.name}.</h1>
         <p className="mt-3 max-w-xl text-sm leading-7 text-muted-foreground">Manage sermons and review what the congregation has been sharing.</p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/admin/live" className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-bold text-primary-foreground">
+            <Radio size={16} /> Start live broadcast
+          </Link>
+          <Link href="/live" className="inline-flex items-center gap-2 rounded-full border border-primary/20 px-5 py-3 text-sm font-bold text-primary hover:bg-muted">
+            <Video size={16} /> Preview Watch Live page
+          </Link>
+        </div>
 
         <div className="mt-8 flex flex-wrap gap-2">
           <TabButton active={tab === 'sermons'} onClick={() => setTab('sermons')} icon={<Radio size={15} />} label="Sermons" />
