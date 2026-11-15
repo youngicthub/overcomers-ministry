@@ -17,6 +17,7 @@ import {
   Share2,
   ShieldCheck,
   Square,
+  SwitchCamera,
   Video,
 } from 'lucide-react';
 import {
@@ -142,6 +143,8 @@ function MediaAdminStudio() {
   const sessionIdRef = useRef<string | null>(null);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState('');
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [switchingCamera, setSwitchingCamera] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
   const [title, setTitle] = useState('Sunday Celebration Service');
@@ -188,12 +191,17 @@ function MediaAdminStudio() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : {}),
+          facingMode: selectedCameraId ? undefined : { ideal: facingMode },
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
         audio: true,
       });
       streamRef.current = stream;
+      const actualFacingMode = stream.getVideoTracks()[0]?.getSettings().facingMode;
+      if (actualFacingMode === 'user' || actualFacingMode === 'environment') {
+        setFacingMode(actualFacingMode);
+      }
       void refreshCameras().catch((cameraError: unknown) => {
         setError(cameraError instanceof Error ? cameraError.message : 'Could not list available cameras.');
       });
@@ -212,6 +220,68 @@ function MediaAdminStudio() {
         : name === 'NotFoundError'
           ? 'No camera was found. Connect a camera or choose an available device.'
           : cameraError instanceof Error ? cameraError.message : 'Camera access was denied.');
+    }
+  };
+
+  const flipCamera = async () => {
+    const stream = streamRef.current;
+    const currentTrack = stream?.getVideoTracks()[0];
+    if (!stream || !currentTrack || switchingCamera) return;
+
+    const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    let replacementStream: MediaStream | null = null;
+    setSwitchingCamera(true);
+    setError('');
+    setNotice('');
+    try {
+      replacementStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { exact: nextFacingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      const replacementTrack = replacementStream.getVideoTracks()[0];
+      if (!replacementTrack) throw new Error('The other camera did not provide a video track.');
+
+      const videoSenders = Array.from(viewerPeersRef.current.values())
+        .flatMap((peer) => peer.getSenders())
+        .filter((sender) => sender.track?.kind === 'video');
+      try {
+        await Promise.all(videoSenders.map((sender) => sender.replaceTrack(replacementTrack)));
+      } catch (replaceError) {
+        await Promise.allSettled(videoSenders.map((sender) => sender.replaceTrack(currentTrack)));
+        throw replaceError;
+      }
+
+      stream.removeTrack(currentTrack);
+      stream.addTrack(replacementTrack);
+      currentTrack.stop();
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        void videoRef.current.play().catch(() => {
+          setNotice('Camera switched. Tap the preview if it does not appear.');
+        });
+      }
+      const actualFacingMode = replacementTrack.getSettings().facingMode;
+      setFacingMode(actualFacingMode === 'user' || actualFacingMode === 'environment'
+        ? actualFacingMode
+        : nextFacingMode);
+      const deviceId = replacementTrack.getSettings().deviceId;
+      if (deviceId) setSelectedCameraId(deviceId);
+      setNotice(`Switched to the ${nextFacingMode === 'environment' ? 'rear' : 'front'} camera.`);
+      await refreshCameras().catch((refreshError: unknown) => {
+        setError(refreshError instanceof Error ? refreshError.message : 'Camera switched, but available cameras could not be refreshed.');
+      });
+    } catch (cameraError) {
+      replacementStream?.getTracks().forEach((track) => track.stop());
+      setError(cameraError instanceof Error
+        ? cameraError.message
+        : 'Could not switch cameras. Check that the other camera is available.');
+    } finally {
+      setSwitchingCamera(false);
     }
   };
 
@@ -450,6 +520,17 @@ function MediaAdminStudio() {
               {cameraReady && !broadcasting && (
                 <button type="button" onClick={stopLocalMedia} className="inline-flex items-center gap-2 rounded-full border border-primary-foreground/25 px-5 py-3 text-sm font-semibold text-primary-foreground">
                   <CameraOff size={16} /> Turn camera off
+                </button>
+              )}
+              {cameraReady && (
+                <button
+                  type="button"
+                  onClick={() => void flipCamera()}
+                  disabled={switchingCamera}
+                  className="inline-flex items-center gap-2 rounded-full border border-primary-foreground/25 px-5 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                >
+                  {switchingCamera ? <Loader2 className="animate-spin" size={16} /> : <SwitchCamera size={16} />}
+                  {switchingCamera ? 'Switching camera…' : `Flip to ${facingMode === 'user' ? 'rear' : 'front'} camera`}
                 </button>
               )}
             </div>
