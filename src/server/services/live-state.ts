@@ -1,5 +1,4 @@
 import { kvDeleteByPrefix, kvGet, kvGetByPrefix, kvSet } from "./kv";
-import { ConfigError } from "@/server/lib/config";
 
 export type LiveSignal = {
   sessionId: string;
@@ -59,6 +58,11 @@ const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
 ];
 
+export type LiveIceConfiguration = {
+  iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }>;
+  warning: string | null;
+};
+
 const EMPTY: LiveRecord = { offer: null, answer: null, title: null, message: null, startedAt: null };
 
 function viewerPrefix(sessionId: string) {
@@ -88,20 +92,28 @@ export async function getLiveStatus(): Promise<LiveStatus> {
   return toStatus(await read());
 }
 
-export function getLiveIceServers() {
+export function getLiveIceServers(): LiveIceConfiguration {
   const urls = process.env.LIVE_TURN_URLS?.split(",").map((url) => url.trim()).filter(Boolean) ?? [];
-  if (urls.length === 0) return DEFAULT_ICE_SERVERS;
-
   const username = process.env.LIVE_TURN_USERNAME;
   const credential = process.env.LIVE_TURN_CREDENTIAL;
-  if (!username || !credential) {
-    throw new ConfigError("LIVE_TURN_URLS requires LIVE_TURN_USERNAME and LIVE_TURN_CREDENTIAL.");
+  const hasPartialCredentials = urls.length > 0
+    ? !username || !credential
+    : Boolean(username || credential);
+  const hasInvalidUrls = urls.some((url) => !url.startsWith("turn:") && !url.startsWith("turns:"));
+
+  if (hasPartialCredentials || hasInvalidUrls) {
+    return {
+      iceServers: DEFAULT_ICE_SERVERS,
+      warning: "TURN settings are incomplete or invalid. Direct connections will still be attempted, but viewers on restricted networks may not connect.",
+    };
   }
 
-  return [
-    ...DEFAULT_ICE_SERVERS,
-    { urls, username, credential },
-  ];
+  return {
+    iceServers: urls.length > 0 && username && credential
+      ? [...DEFAULT_ICE_SERVERS, { urls, username, credential }]
+      : DEFAULT_ICE_SERVERS,
+    warning: null,
+  };
 }
 
 export async function publishOffer(offer: LiveSession, title: string) {

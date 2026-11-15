@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Camera,
   CameraOff,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 import {
   qk,
+  adminLogout,
   getLiveIceServers,
   getLiveOffer,
   getLiveViewerAnswer,
@@ -85,7 +87,15 @@ function preferredCandidateType(iceServers: RTCIceServer[]): 'srflx' | 'relay' {
   return hasTurnServer(iceServers) ? 'relay' : 'srflx';
 }
 
-function BroadcastHeader({ isLive }: { isLive: boolean }) {
+function BroadcastHeader({
+  isLive,
+  onLogout,
+  loggingOut,
+}: {
+  isLive: boolean;
+  onLogout: () => void;
+  loggingOut: boolean;
+}) {
   return (
     <div className="flex flex-col justify-between gap-5 border-b border-border pb-7 sm:flex-row sm:items-end">
       <div>
@@ -105,12 +115,24 @@ function BroadcastHeader({ isLive }: { isLive: boolean }) {
         <span className={`h-2 w-2 rounded-full ${isLive ? 'animate-pulse bg-accent' : 'bg-muted-foreground/40'}`} />
         {isLive ? 'Live now' : 'Offline'}
       </span>
-      <Link href="/admin/dashboard" className="self-start rounded-full border border-primary/20 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-primary hover:bg-muted sm:self-auto">Dashboard</Link>
+      <div className="flex items-center gap-2 self-start sm:self-auto">
+        <Link href="/admin/dashboard" className="rounded-full border border-primary/20 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-primary hover:bg-muted">Dashboard</Link>
+        <button
+          type="button"
+          onClick={onLogout}
+          disabled={loggingOut}
+          className="inline-flex items-center gap-2 rounded-full border border-primary/20 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-primary hover:bg-muted disabled:opacity-60"
+        >
+          {loggingOut ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+          {loggingOut ? 'Logging out' : 'Log out'}
+        </button>
+      </div>
     </div>
   );
 }
 
 function MediaAdminStudio() {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const viewerPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -130,6 +152,7 @@ function MediaAdminStudio() {
   const [error, setError] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState('/live');
+  const [loggingOut, setLoggingOut] = useState(false);
   const queryClient = useQueryClient();
   const publishOffer = usePublishLiveOffer();
   const stopSession = useStopLiveSession();
@@ -210,7 +233,8 @@ function MediaAdminStudio() {
       }
       if (!stream) return;
 
-      iceServersRef.current = await getLiveIceServers();
+      const iceConfiguration = await getLiveIceServers();
+      iceServersRef.current = iceConfiguration.iceServers;
       const sessionId = crypto.randomUUID();
       sessionIdRef.current = sessionId;
       await publishOffer.mutateAsync({
@@ -218,7 +242,9 @@ function MediaAdminStudio() {
         title: title.trim() || 'Live from Overcomers',
       });
       setBroadcasting(true);
-      setNotice('You are live. Keep this window open while you broadcast.');
+      setNotice(iceConfiguration.warning
+        ? `You are live, but ${iceConfiguration.warning}`
+        : 'You are live. Keep this window open while you broadcast.');
       await queryClient.invalidateQueries({ queryKey: qk.liveStatus });
 
       viewerPollRef.current = window.setInterval(() => {
@@ -307,6 +333,19 @@ function MediaAdminStudio() {
     await queryClient.invalidateQueries({ queryKey: qk.liveStatus });
   };
 
+  const logout = async () => {
+    setLoggingOut(true);
+    setError('');
+    try {
+      if (sessionIdRef.current) await stopBroadcast();
+      await adminLogout();
+      router.replace('/admin/login');
+    } catch (logoutError) {
+      setError(logoutError instanceof Error ? logoutError.message : 'Could not log out. Please try again.');
+      setLoggingOut(false);
+    }
+  };
+
   const copyShareLink = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -328,7 +367,11 @@ function MediaAdminStudio() {
 
   return (
     <section className="mx-auto max-w-7xl px-5 py-14 sm:py-20 lg:px-8">
-      <BroadcastHeader isLive={broadcasting || Boolean(status.data?.isLive)} />
+      <BroadcastHeader
+        isLive={broadcasting || Boolean(status.data?.isLive)}
+        onLogout={() => void logout()}
+        loggingOut={loggingOut}
+      />
       <div className="mt-10 grid gap-8 lg:grid-cols-[1.25fr_.75fr]">
         <div className="overflow-hidden rounded-[2rem] bg-primary shadow-xl">
           <div className="relative aspect-video bg-[#0b1027]">
@@ -514,11 +557,12 @@ function ViewerExperience() {
       setConnection('connecting');
       setConnectionError('');
       try {
-        const [offer, iceServers] = await Promise.all([getLiveOffer(), getLiveIceServers()]);
+        const [offer, iceConfiguration] = await Promise.all([getLiveOffer(), getLiveIceServers()]);
         if (!offer?.sessionId) {
           setConnection('waiting');
           return;
         }
+        const iceServers = iceConfiguration.iceServers;
         const viewerId = crypto.randomUUID();
         peer = new RTCPeerConnection({ iceServers });
         peer.addTransceiver('video', { direction: 'recvonly' });
@@ -541,7 +585,9 @@ function ViewerExperience() {
           if (!cancelled && peer?.connectionState === 'failed') {
             setConnectionError(hasTurnServer(iceServers)
               ? 'The phone could not connect through the network. Check its internet connection and try again.'
-              : 'This phone network needs a TURN relay. Ask the broadcast administrator to configure TURN in Vercel.');
+              : iceConfiguration.warning
+                ? iceConfiguration.warning
+                : 'This phone network needs a TURN relay. Ask the broadcast administrator to configure TURN in Vercel.');
             setConnection('error');
           }
         };

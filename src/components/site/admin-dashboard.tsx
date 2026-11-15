@@ -10,6 +10,8 @@ import {
   HandHeart,
   ImagePlus,
   Loader2,
+  LogOut,
+  Menu,
   Pencil,
   Plus,
   Radio,
@@ -18,7 +20,9 @@ import {
   Users,
   UsersRound,
   Video,
+  X,
 } from 'lucide-react';
+import { adminLogout } from '@/lib/api';
 
 type AdminSession = { admin: { id: string; name: string } };
 
@@ -834,6 +838,9 @@ export function AdminDashboardPage() {
   const router = useRouter();
   const [session, setSession] = useState<AdminSession | null | 'loading'>('loading');
   const [tab, setTab] = useState<Tab>('sermons');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -842,6 +849,18 @@ export function AdminDashboardPage() {
       .catch(() => { if (active) router.replace('/admin/login'); });
     return () => { active = false; };
   }, [router]);
+
+  const logout = async () => {
+    setLoggingOut(true);
+    setLogoutError('');
+    try {
+      await adminLogout();
+      router.replace('/admin/login');
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Could not log out. Please try again.');
+      setLoggingOut(false);
+    }
+  };
 
   if (session === 'loading' || session === null) {
     return (
@@ -854,10 +873,34 @@ export function AdminDashboardPage() {
   return (
     <main className="min-h-[100dvh] bg-background px-5 py-12 lg:px-8">
       <div className="mx-auto max-w-5xl">
-        <Link href="/admin/live" className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-primary"><ArrowLeft size={16} /> Back to broadcast studio</Link>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <Link href="/admin/live" className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><ArrowLeft size={16} /> Back to broadcast studio</Link>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            disabled={loggingOut}
+            className="inline-flex items-center gap-2 rounded-full border border-primary/20 px-4 py-2.5 text-sm font-semibold text-primary hover:bg-muted disabled:opacity-60"
+          >
+            {loggingOut ? <Loader2 size={16} className="animate-spin" /> : <LogOut size={16} />}
+            {loggingOut ? 'Logging out…' : 'Log out'}
+          </button>
+        </div>
         <div className="mb-4 flex items-center gap-3 text-accent"><span className="gold-rule" /><span className="eyebrow">Media Admin dashboard</span></div>
-        <h1 className="font-display text-4xl leading-tight text-primary">Welcome, {session.admin.name}.</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-display text-4xl leading-tight text-primary">Welcome, {session.admin.name}.</h1>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
+            aria-controls="admin-dashboard-menu"
+            aria-label={menuOpen ? 'Close dashboard menu' : 'Open dashboard menu'}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-primary/20 text-primary hover:bg-muted"
+          >
+            {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
         <p className="mt-3 max-w-xl text-sm leading-7 text-muted-foreground">Manage sermons and review what the congregation has been sharing.</p>
+        {logoutError && <p className="mt-3 text-sm text-red-600" role="alert">{logoutError}</p>}
         <div className="mt-6 flex flex-wrap gap-3">
           <Link href="/admin/live" className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-bold text-primary-foreground">
             <Radio size={16} /> Start live broadcast
@@ -867,15 +910,17 @@ export function AdminDashboardPage() {
           </Link>
         </div>
 
-        <div className="mt-8 flex flex-wrap gap-2">
-          <TabButton active={tab === 'sermons'} onClick={() => setTab('sermons')} icon={<Radio size={15} />} label="Sermons" />
-          <TabButton active={tab === 'articles'} onClick={() => setTab('articles')} icon={<FileText size={15} />} label="Articles" />
-          <TabButton active={tab === 'videos'} onClick={() => setTab('videos')} icon={<Video size={15} />} label="Videos" />
-          <TabButton active={tab === 'gallery'} onClick={() => setTab('gallery')} icon={<ImagePlus size={15} />} label="Gallery" />
-          <TabButton active={tab === 'prayers'} onClick={() => setTab('prayers')} icon={<HandHeart size={15} />} label="Prayer requests" />
-          <TabButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={15} />} label="New members" />
-          <TabButton active={tab === 'workers'} onClick={() => setTab('workers')} icon={<UsersRound size={15} />} label="Workers" />
-        </div>
+        {menuOpen && (
+          <nav id="admin-dashboard-menu" aria-label="Dashboard sections" className="mt-6 flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-4">
+            <TabButton active={tab === 'sermons'} onClick={() => { setTab('sermons'); setMenuOpen(false); }} icon={<Radio size={15} />} label="Sermons" />
+            <TabButton active={tab === 'articles'} onClick={() => { setTab('articles'); setMenuOpen(false); }} icon={<FileText size={15} />} label="Articles" />
+            <TabButton active={tab === 'videos'} onClick={() => { setTab('videos'); setMenuOpen(false); }} icon={<Video size={15} />} label="Videos" />
+            <TabButton active={tab === 'gallery'} onClick={() => { setTab('gallery'); setMenuOpen(false); }} icon={<ImagePlus size={15} />} label="Gallery" />
+            <TabButton active={tab === 'prayers'} onClick={() => { setTab('prayers'); setMenuOpen(false); }} icon={<HandHeart size={15} />} label="Prayer requests" />
+            <TabButton active={tab === 'members'} onClick={() => { setTab('members'); setMenuOpen(false); }} icon={<Users size={15} />} label="New members" />
+            <TabButton active={tab === 'workers'} onClick={() => { setTab('workers'); setMenuOpen(false); }} icon={<UsersRound size={15} />} label="Workers" />
+          </nav>
+        )}
 
         <div className="mt-8">
           {tab === 'sermons' && <SermonsPanel />}

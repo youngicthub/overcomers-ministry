@@ -175,13 +175,14 @@ export type LiveIceServer = {
   username?: string;
   credential?: string;
 };
+export type LiveIceConfiguration = { iceServers: LiveIceServer[]; warning: string | null };
 
 export function getLiveOffer() {
   return get<LiveSession | null>('/api/live/offer');
 }
 
 export function getLiveIceServers() {
-  return get<LiveIceServer[]>('/api/live/ice-servers');
+  return get<LiveIceConfiguration>('/api/live/ice-servers');
 }
 
 export function updateLiveMessage(data: { sessionId: string; message: string }) {
